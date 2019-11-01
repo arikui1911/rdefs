@@ -1,26 +1,6 @@
 require 'optparse'
 
 class Rdefs
-  CLASS_REGEX = /\A\s*(?:
-    class\s | module\s | include[\s\(]
-    )/x
-
-  DEF_REGEX = /\A\s*
-    (?: def\s
-      | class\s
-      | module\s
-      | include\b
-      | alias(?:_\w+)?\b
-      | attr_reader\b
-      | attr_writer\b
-      | attr_accessor\b
-      | attr\b
-      | public\b
-      | private\b
-      | protected\b
-      | module_function\b
-      )/x
-
   class Preprocessor
     def initialize(f)
       @f = f
@@ -28,9 +8,9 @@ class Rdefs
 
     def gets
       line = @f.gets
-      if /^=begin\s/ =~ line
+      if begin_line?(line)
         while line = @f.gets
-          break if /^=end\s/ =~ line
+          break if end_line?(line)
         end
         line = @f.gets
       end
@@ -40,10 +20,40 @@ class Rdefs
     def lineno
       @f.lineno
     end
+
+    private
+
+    def begin_line?(line)
+      return false unless line
+      return false unless line.start_with?('=begin')
+      Util.space? line['=begin'.size, 1]
+    end
+
+    def end_line?(line)
+      return false unless line
+      return false unless line.start_with?('=end')
+      Util.space? line['=end'.size, 1]
+    end
+  end
+
+  module Util
+    module_function
+
+    SPACES = [" ", "\t", "\r", "\n", "\f", "\v"]
+
+    def space?(c)
+      SPACES.include? c
+    end
+
+    WORDS = [*('a'..'z'), *('A'..'Z'), *('0'..'9'), '_']
+
+    def word_component?(c)
+      WORDS.include? c
+    end
   end
 
   def initialize
-    @re = DEF_REGEX
+    @def_method = :def_beginning_line?
     @print_line_number_p = false
     @f = Preprocessor.new(ARGF)
     parse_options
@@ -53,7 +63,7 @@ class Rdefs
     options = OptionParser.new do |opt|
       opt.banner = "#{File.basename($0)} [-n] [file...]"
       opt.on('--class', 'Show only classes and modules') {
-        @re = CLASS_REGEX
+        @def_method = :class_def_beginning_line?
       }
       opt.on('-n', '--lineno', 'Prints line number.') {
         @print_line_number_p = true
@@ -74,7 +84,7 @@ class Rdefs
 
   def process
     while line = @f.gets
-      if @re =~ line
+      if send(@def_method, line)
         printf '%4d: ', @f.lineno if @print_line_number_p
         print getdef(line, @f)
       end
@@ -93,5 +103,43 @@ class Rdefs
   def balanced?(str)
     s = str.gsub(/'.*?'/, '').gsub(/".*?"/, '')
     s.count('(') == s.count(')')
+  end
+
+  private
+
+  DEFS = ['def', 'class', 'module', 'include', 'alias',
+          'attr_reader', 'attr_writer', 'attr_accessor', 'attr',
+          'public', 'private', 'protected', 'module_function']
+
+  def def_beginning_line?(line)
+    line = line.lstrip
+    w = DEFS.detect{|w| line.start_with?(w) } or return false
+    c = line[w.size, 1]
+    case w
+    when 'def', 'class', 'module'
+      return true if Util.space?(c)
+    when 'include', 'attr_reader', 'attr_writer', 'attr_accessor', 'attr',
+         'public', 'private', 'protected', 'module_function'
+      return true unless Util.word_component?(c)
+    when 'alias'
+      return true unless Util.word_component?(c)
+      return false unless c == '_'
+      rest = line[w.size+1..-1]
+      n = rest.each_char.take_while{|c| Util.word_component?(c) }.size
+      return false unless n > 1
+      return true unless Util.word_component?(rest[n, 1])
+    end
+    false
+  end
+
+  CLASS_DEFS = ['class', 'module', 'include']
+
+  def class_def_beginning_line?(line)
+    line = line.lstrip
+    w = CLASS_DEFS.detect{|w| line.start_with?(w) } or return false
+    c = line[w.size, 1]
+    return true if Util.space?(c)
+    return true if w == 'include' && c == '('
+    false
   end
 end
