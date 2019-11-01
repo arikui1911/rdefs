@@ -1,3 +1,5 @@
+# coding: utf-8
+require 'kconv'
 require 'optparse'
 
 class Rdefs
@@ -27,18 +29,24 @@ class Rdefs
     end
 
     def gets
-      line = @f.gets
+      line = get_line()
       if /^=begin\s/ =~ line
-        while line = @f.gets
+        while line = get_line()
           break if /^=end\s/ =~ line
         end
-        line = @f.gets
+        line = get_line()
       end
       line
     end
 
     def lineno
       @f.lineno
+    end
+
+    private
+
+    def get_line
+      @f.gets&.toutf8
     end
   end
 
